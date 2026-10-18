@@ -1,0 +1,64 @@
+# 部署到 GitHub Pages（项目页 /<仓库名>/）
+#
+# 为什么用 Actions 而不是「Deploy from a branch + /docs」：
+#   两种都能用。这个工作流的好处是**产物永远最新** —— 不需要你在本地 build 完
+#   再把 docs/ 提交上去（忘了 build 就部署了旧版本，是最常见的坑）。
+#   它把构建结果直接作为 Pages artifact 上传，产物不经过 git，仓库也干净。
+#
+# 想改成「分支 + /docs」的零配置方式也完全可以：把本文件删掉或改名，
+# 仓库设置里把 Pages 源选成 main 分支的 /docs 目录即可（docs/ 已经由构建产生）。
+name: 部署到 Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只允许一个部署；排队中的旧任务直接取消，避免连续 push 时互相覆盖
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      # 关键：项目页的地址是 https://<user>.github.io/<repo>/，
+      # 资源必须从 /<repo>/ 下取。这里用绝对 base，比相对路径更稳
+      # （相对路径在深层 URL 下会解析错，见 vite.config.ts 的注释）。
+      - name: 构建（绝对 base = 仓库名）
+        env:
+          GHP_BASE: /${{ github.event.repository.name }}/
+        run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          # postbuild 已经把产物写在 docs/ 下，并放了 .nojekyll
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

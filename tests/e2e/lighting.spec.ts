@@ -31,23 +31,35 @@ test.describe('地下光照', () => {
     await openGame(page);
     const y0 = await page.evaluate(() => window.__eartheno.player()!.y);
 
-    // 往下挖一条竖井再站到井底：直接用世界接口改地形，比真的挖快得多
+    // 往下挖一条竖井再站到井底：直接用世界接口改地形，比真的挖快得多。
+    //
+    // 深度按**绝对值**取不少于 0x8c（140）：地表高度是随机的（实测起始 y 在 66~81 之间跳），
+    // 按"相对 y0 + 34"算会时深时浅，浅的那几次压暗强度到不了阈值 —— 表现为偶发失败。
+    // 落地后 body.y = 地板格 + 0.999，所以地板格放在 bottom+2，
+    // 保证 141 这个位置有地板、且上方 3 格是空气。
     await page.evaluate((y: number) => {
       const api = window.__eartheno;
       const s = api.scene();
       const p = api.player()!;
       const tx = Math.floor(p.x);
-      const bottom = Math.round(y) + 34;
-      for (let ty = Math.round(y); ty <= bottom; ty++) {
+      const bottom = Math.max(Math.round(y) + 40, 145);
+      for (let ty = Math.round(y); ty <= bottom + 2; ty++) {
         for (let dx = -1; dx <= 1; dx++) {
           if (s.world.getBlock(tx + dx, ty) !== 15) s.world.setBlock(tx + dx, ty, 0);
         }
       }
-      // 井底铺一层石头站住
-      for (let dx = -1; dx <= 1; dx++) s.world.setBlock(tx + dx, bottom + 1, 3);
+      // 井底铺两层石头站住（单层在低帧率下可能被下落速度隧穿）
+      for (let dx = -1; dx <= 1; dx++) {
+        s.world.setBlock(tx + dx, bottom + 1, 3);
+        s.world.setBlock(tx + dx, bottom + 2, 3);
+      }
       api.teleport(tx + 0.5, bottom + 1);
     }, y0);
-    await page.waitForTimeout(600);
+
+    // 等 darknessAmount 稳定：它只取决于 body.y，落地即不动，是这里唯一可靠的信号。
+    // 不用 onGround —— 落地瞬间的贴地校正会让它反复横跳几帧；
+    // 也不再用 waitForTimeout(600/300)，整轮跑满时那个值根本不够。
+    await page.waitForFunction(() => (window.__eartheno.darkness()?.amount ?? 0) > 0.4, null, { timeout: 8000 });
 
     const d = await page.evaluate(() => window.__eartheno.darkness()!);
     // 深处必须明显变暗（最多 0.86）

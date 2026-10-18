@@ -21,7 +21,8 @@
   <body>
     <div id="game" aria-label="游戏画面"></div>
 
-    <!-- 竖屏闸门 -->
+    <!-- 竖屏闸门。手机锁了方向时，"请横过来"本身没用 —— 必须给一条自救路径，
+         所以这里带一个按钮：全屏 + 锁横屏（只能在用户手势里调，按钮就是那个手势）。 -->
     <div id="orient-gate" class="gate" hidden>
       <svg viewBox="0 0 64 64" class="gate__icon" aria-hidden="true">
         <rect x="22" y="8" width="20" height="34" rx="4" fill="none" stroke="currentColor" stroke-width="3" />
@@ -30,6 +31,10 @@
       </svg>
       <div class="gate__title">请把手机横过来</div>
       <div class="gate__sub">地髓是横版世界，横屏才能看见脚下的矿脉。</div>
+      <div class="gate__actions">
+        <button class="btn btn--primary touch" id="gate-landscape">自动横屏（全屏）</button>
+        <div class="gate__hint" id="gate-hint" hidden></div>
+      </div>
     </div>
 
     <!-- 启动 / 读档中的遮罩 -->

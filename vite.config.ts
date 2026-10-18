@@ -1,23 +1,40 @@
 import { defineConfig } from 'vite';
 
 /**
- * 部署路径（base）的决定逻辑 —— 这里踩过一次，记清楚：
+ * 部署路径（base）的决定逻辑 —— 这里踩过两次，记清楚：
  *
- * `base: './'`（相对路径）在「项目页 /<仓库名>/」和「根路径 /」下都能跑，
- * 实测过子目录、无尾斜杠、显式 index.html、离线重开四种场景都正常。
- * SW 注册用的是 `new URL('sw.js', document.baseURI)`，天然跟随 base。
+ * **① 默认 base 是 `'/'`，相对 base 只留给本地预览与 E2E。**
+ * 早先默认 `'./'`（相对路径），结果线上就吃了亏：
+ * 页面正常、资源 200，但 `manifest.webmanifest` 里是 `"start_url": "./"`、
+ * `"scope": "./"` —— 这两个字段的相对基准是 **manifest 文件自己所在的目录**，
+ * 于是浏览器算出来的 scope 变成了 `/eartheno/manifest.webmanifest`，
+ * 一个"以文件路径为前缀"的非法 scope。表现是：Chrome 能装，但装出来的应用
+ * 打开是空白的；Safari 里的作用域判断也会跟着歪。
+ * 用绝对路径 `"/eartheno/"` 就完全没有这层歧义。
  *
- * 但相对路径有一个真实隐患：**任何深层 URL**（例如 SPA 回退后的 /repo/a/b/）
- * 都会把 './assets' 解析到 /repo/a/b/assets，直接 404。
- * GitHub Pages 不做 SPA 回退，本项目也不会产生深层 URL，所以目前是安全的；
- * 但如果哪天加了路由，务必切到绝对路径。
+ *   npm run build                      → base '/'（GitHub 用户页 / 自有域名根目录）
+ *   GHP_BASE=/eartheno/ npm run build  → base '/eartheno/'（GitHub 项目页）
+ *   E2E_FORCE_RELATIVE=1 …             → base './'（本地 127.0.0.1:4319 根路径预览）
  *
- * 因此留了一个显式开关：设 `GHP_BASE=/仓库名/` 就用绝对路径，最稳。
+ * 相对 base 的另一个隐患：**任何深层 URL**（/repo/a/b/）都会把 './assets' 解析到
+ * /repo/a/b/assets 而 404。GitHub Pages 不做 SPA 回退、本项目也不产生深层 URL，
+ * 所以相对 base 目前只用于本地预览；线上别用它。
  *
- *   npm run build                      → base './'（相对，任意子目录可用）
- *   GHP_BASE=/eartheno/ npm run build  → base '/eartheno/'（GitHub 项目页，绝对路径）
+ * **② `GHP_BASE` 没写结尾斜杠时自动补上**（`/eartheno` → `/eartheno/`）。
+ * Vite 自己会规整，但 tools/postbuild.mjs 还要拿它拼 manifest / 图标路径，
+ * 少一个斜杠就会拼出 `/earthenoicons/x.png`。统一在这里抹平，下游只面对规整值。
  */
-const base = process.env.GHP_BASE || './';
+function normalizeBase(raw: string): string {
+  const v = (raw || '').trim();
+  if (!v || v === '/') return '/';
+  if (v === './' || v === '.') return './';
+  // 完整 URL（CDN 场景）原样返回，只保证结尾斜杠
+  if (/^https?:\/\//i.test(v)) return v.endsWith('/') ? v : `${v}/`;
+  const withLead = v.startsWith('/') ? v : `/${v}`;
+  return withLead.endsWith('/') ? withLead : `${withLead}/`;
+}
+
+const base = normalizeBase(process.env.GHP_BASE || (process.env.E2E_FORCE_RELATIVE === '1' ? './' : '/'));
 
 export default defineConfig({
   base,

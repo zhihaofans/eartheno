@@ -24,16 +24,19 @@ function run(cmd, args) {
   if (r.status !== 0) process.exit(r.status ?? 1);
 }
 
-// E2E 在 http://127.0.0.1:4319/ 根路径上跑产物，产物必须是相对 base。
-// 若上一次构建用了 GHP_BASE（绝对路径），产物会全部指向 /仓库名/assets/，
-// 测试会 29 个一起 404 —— 报错信息还全是"加载不出游戏"，极难定位。
-// 所以 test:e2e 强制清掉这个变量，从入口处杜绝。
+// E2E 在 http://127.0.0.1:4319/ 根路径上跑产物。
+// 之前这里强制用相对 base，好处是"产物拷到任何子目录都能跑"，但代价是
+// manifest 的 scope / start_url 也变成相对值 —— 而相对值的基准是 manifest 文件自己，
+// 算出来是以 .webmanifest 结尾的非法 scope，PWA 装到桌面是空白。
+// 现在 E2E 直接在**根路径**上预览，用绝对 base "/" 同样跑得通，且产物形态
+// 与线上（GitHub Pages 的 /<仓库名>/）除了前缀之外完全一致，测的东西更有意义。
+// 若某天要测子目录部署，用 E2E_FORCE_RELATIVE=1 显式切回相对 base。
 if (process.env.E2E_FORCE_RELATIVE === '1' && process.env.GHP_BASE) {
-  console.log('test:e2e 需要相对 base，已忽略 GHP_BASE');
+  console.log('E2E_FORCE_RELATIVE=1：忽略 GHP_BASE，改用相对 base');
   delete process.env.GHP_BASE;
 }
 
-const base = process.env.GHP_BASE || './';
+const base = process.env.GHP_BASE || (process.env.E2E_FORCE_RELATIVE === '1' ? './' : '/');
 console.log(`\n构建 base = ${base}`);
 
 // ── base 变了怎么办 ──────────────────────────────────────
@@ -49,7 +52,7 @@ console.log(`\n构建 base = ${base}`);
 // base 变化影响的恰好就是这几处。旧哈希文件留着无害（见 emptyOutDir=false 的理由）。
 const OUT = join(ROOT, 'docs');
 const marker = join(OUT, '.build-meta.json');
-const wantBase = process.env.GHP_BASE || './';
+const wantBase = process.env.GHP_BASE || (process.env.E2E_FORCE_RELATIVE === '1' ? './' : '/');
 if (existsSync(marker)) {
   try {
     const prev = JSON.parse(readFileSync(marker, 'utf8'));

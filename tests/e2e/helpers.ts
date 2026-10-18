@@ -22,9 +22,13 @@ export interface EarthenoApi {
   screenOf(tx: number, ty: number): { x: number; y: number } | null;
   darkness(): {
     amount: number;
+    visible: boolean;
+    /** 本帧暗层是否真的重绘过 */
+    painted: boolean;
+    /** 暗层累计重绘次数，用来等"画面已按最终位置画好" */
+    pass: number;
     center: { x: number; y: number };
     canvas: { w: number; h: number };
-    visible: boolean;
   } | null;
   save(): Promise<void>;
   exportText(): Promise<string>;

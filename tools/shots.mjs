@@ -67,7 +67,8 @@ await shot('挖掘中');
 await page.mouse.up();
 await page.waitForTimeout(200);
 
-// ③ 地下：挖一口 7 宽竖井站到井底，暗层与光晕才会出现
+// ③ 地下：挖一条 3 格高的水平矿道站进去 —— 暗层靠"深度"触发，
+//    顺便让截图体现出环境光（岩壁可见）而不是一束聚光。手持镐子会更亮一档。
 await page.evaluate(() => {
   const api = window.__eartheno;
   const s = api.scene();
@@ -75,13 +76,19 @@ await page.evaluate(() => {
   const tx = Math.floor(p.x);
   const top = Math.round(p.y);
   const bottom = top + 30;
+  // 先挖竖井下去
   for (let ty = top; ty <= bottom; ty++) {
-    for (let dx = -3; dx <= 3; dx++) {
+    for (let dx = -1; dx <= 1; dx++) {
       if (s.world.getBlock(tx + dx, ty) !== 15) s.world.setBlock(tx + dx, ty, 0);
     }
   }
-  for (let dx = -3; dx <= 3; dx++) s.world.setBlock(tx + dx, bottom + 1, 3);
-  api.teleport(tx + 0.5, bottom + 1);
+  // 再横向挖一条能看见两头的矿道
+  for (let x = tx - 10; x <= tx + 10; x++) {
+    for (let dy = 0; dy < 3; dy++) s.world.setBlock(x, bottom - dy, 0);
+    s.world.setBlock(x, bottom + 1, 3);
+    s.world.setBlock(x, bottom - 3, 3);
+  }
+  api.teleport(tx + 0.5, bottom);
 });
 await page.waitForTimeout(1800);
 await shot('地下');

@@ -26,15 +26,15 @@ npm run build
    - 按 mtime 保留最近 3 代 `assets/`，删掉更早的；
    - 打印体积表，**首屏代码 gzip 超过 400 kB 直接失败**（CI 能拦住）。
 
-产物体积参考（v0.1.0）：
+产物体积参考（v0.2.0）：
 
 | 文件 | 原始 | gzip |
 | --- | --- | --- |
 | `assets/phaser-*.js` | 1447 kB | 329 kB |
-| `assets/index-*.js` | 71 kB | 27 kB |
-| `assets/style-*.css` | 10 kB | 3 kB |
-| 其余（index.html / manifest / sw / 图标） | ~38 kB | ~30 kB |
-| **首屏代码合计** | — | **≈ 363 kB / 预算 400 kB** |
+| `assets/index-*.js` | 78 kB | 30 kB |
+| `assets/style-*.css` | 11 kB | 3 kB |
+| 其余（index.html / manifest / sw / 图标） | ~35 kB | ~26 kB |
+| **首屏代码合计** | — | **≈ 367 kB / 预算 400 kB** |
 
 体积几乎全是 Phaser 本身。想再压：把 `manualChunks` 里的 phaser 换成按需 import（不划算，
 核心就是引擎）；或者接受首屏大、靠 SW 第二次起零加载。
@@ -75,19 +75,35 @@ server {
 
 ---
 
-## 3. 部署到子目录
+## 3. 部署到子目录（`base` 怎么定）
 
-`vite.config.ts` 里 `base: './'`，所有资源都是相对路径，因此：
+**结论先说：线上部署一律用绝对 base，别用 `'./'`。**
 
-- ✅ `https://example.com/eartheno/`
-- ✅ `https://example.com/some/deep/path/`
-- ✅ `https://user.github.io/repo-name/`
+| 部署位置 | 构建命令 | 产物里的路径 |
+| --- | --- | --- |
+| GitHub 项目页 `/<仓库名>/` | `GHP_BASE=/<仓库名>/ npm run build` | `/eartheno/assets/...` |
+| GitHub 用户页 / 自有域名根目录 | `npm run build`（默认 `'/'`） | `/assets/...` |
+| 本地 `vite preview` / E2E | `npm run build`（默认 `'/'`） | `/assets/...` |
+| 真的要用相对路径 | `E2E_FORCE_RELATIVE=1 npm run build` | `./assets/...` |
 
-都不需要改一行配置，直接把 `docs/` 放到对应目录即可。
+为什么不再推荐相对 base（v0.2.0 线上就栽在这里）：
 
-> 注意 `manifest.webmanifest` 的 `start_url` 与 `scope` 也用了 `./`。
-> 如果你希望安装后的图标**直接打开某个子路径**，把 `start_url` 改成 `"./"` 之外的显式值时要保证
-> 它落在 `scope` 内，否则 Chrome 会拒绝安装。
+- `manifest.webmanifest` 里 `"scope": "./"` 的相对基准 **是 manifest 文件自己**，
+  浏览器据此算出来的作用域会变成 `/eartheno/manifest.webmanifest` ——
+  一个以文件名结尾的非法 scope。现象很迷惑：**Chrome 能装，装完打开是空白页**。
+- 深层 URL（`/repo/a/b/`）会把 `./assets` 解析到 `/repo/a/b/assets` 而 404。
+
+绝对 base 没有这层歧义。`GHP_BASE` 忘了写结尾斜杠也会自动补（`eartheno` → `/eartheno/`），
+构建日志里会打印一行确认：
+
+```
+base = "/eartheno/"（绝对）→ manifest 的 scope/start_url 都是站点绝对路径，PWA 安装后不会白屏
+```
+
+`tools/postbuild.mjs` 还会拦一种必然出错的产物：scope 以 `.webmanifest` / `.json` / `.html` 结尾时直接构建失败。
+
+> 用绝对 base 时，站点必须挂在**该前缀那一层**。放到 `https://example.com/games/eartheno/`
+> 就必须用 `GHP_BASE=/games/eartheno/`，否则资源全 404。
 
 ### GitHub Pages（重点）
 
@@ -116,11 +132,9 @@ git add docs && git commit -m "build" && git push
 
 站点地址是 `https://<用户名>.github.io/<仓库名>/`。
 
-**为什么建议用 `GHP_BASE=/<仓库名>/` 而不是默认的 `./`：**
-相对路径 `./` 在绝大多数场景都能跑（实测过子目录、无尾斜杠、显式 index.html、离线重开），
-但它对**深层 URL** 不健壮 —— 页面一旦出现在 `/repo/a/b/`，`./assets/x.js` 会解析到
-`/repo/a/b/assets/x.js` 而 404。GitHub Pages 不做 SPA 回退、本项目也不产生深层 URL，
-所以默认的 `./` 目前是安全的；用绝对 base 只是把"以后别踩"这个隐患提前消掉。
+**`GHP_BASE=/<仓库名>/` 不能省。** 站点地址是 `https://<用户名>.github.io/<仓库名>/`，
+不带这个前缀构建出来的 `/assets/x.js` 会指到 `https://<用户名>.github.io/assets/x.js`（404），
+manifest 的 scope 也会落到用户根目录上，和别的项目抢作用域。
 
 #### 方式 B：GitHub Actions（产物不进 git）
 
@@ -151,16 +165,23 @@ npm run build && npx gh-pages -d docs --dotfiles
 | 忘记 build 的风险 | 有 | 无 | 有 |
 | 配置复杂度 | 最低 | 低 | 中 |
 
-另外 `.github/workflows/test.yml` 会在每次 push / PR 上跑类型检查、128 个单测、
-构建（含体积预算）与 29 个端到端用例，CI 上失败的重试 2 次以吸收 runner 冷启动抖动。
+另外 `.github/workflows/test.yml` 会在每次 push / PR 上跑类型检查、133 个单测、
+构建（含体积预算）与 33 个端到端用例，CI 上失败的重试 2 次以吸收 runner 冷启动抖动。
 
 #### GitHub Pages 的两个额外注意点
 
 - **必须 HTTPS**（Pages 默认提供）。Service Worker 与"添加到桌面"都要求安全上下文。
-- **缓存头不可控**：Pages 给静态资源发 `cache-control: max-age=600`，`sw.js` 也在其中。
-  这意味着旧 SW 最长可能存活 10 分钟才会被浏览器重新拉取。
-  本项目已用 `updateViaCache: 'none'` 规避（注册 SW 时强制绕过 HTTP 缓存），
-  所以更新提示一般在用户下次打开时就会出现，不会卡 10 分钟。
+- **缓存头不可控**：Pages 给**所有**静态文件发 `cache-control: max-age=600` ——
+  `sw.js`、`version.json`、`index.html` 一视同仁，没有例外。
+  也就是说服务端没有任何办法让"更新立刻推下去"，只能在客户端绕：
+  1. `sw.js` 注册时 `updateViaCache: 'none'` —— 注册那一次不走 HTTP 缓存；
+  2. 每次页面切回前台（`visibilitychange` / `focus`）手动 `reg.update()` 一次 ——
+     把浏览器自带的"24 小时才查一次"压到"每次切前台查一次"；
+  3. `version.json` 请求带 `?cache-bust=<时间戳>`，拿一个全新 URL 绕开缓存
+     （SW 里对 `version.json` 只走网络、不写缓存，否则每条查询串都会占一个 key）。
+- **根路径也要注意**：`https://<用户名>.github.io/<仓库名>`（不带结尾斜杠）会被 Pages
+  301 到 `<仓库名>/`，这一步不影响资源加载，但会让 history 多一条记录。
+  从桌面图标启动时用的是 manifest 的 `start_url`，直接带斜杠，不受影响。
 
 ### Vercel / Netlify / Cloudflare Pages
 
@@ -190,12 +211,17 @@ npm run build && npx gh-pages -d docs --dotfiles
 
 ## 5. 更新机制
 
-1. 页面启动时请求 `version.json`（永远走网络），与当前构建号比对；
-2. 不一致 → 等新 SW `installed` → 顶部横幅「有新版本」；
-3. 用户点确认 → `postMessage('skip-waiting')` → reload。
+1. 页面启动时请求 `version.json?cache-bust=…`（绕开 Pages 的 10 分钟缓存），与当前构建号比对；
+2. 切回前台时先 `reg.update()` 问一次 `sw.js` 有没有变，再比 `version.json`；
+3. 不一致 → 等新 SW `installed` → 顶部横幅「有新版本」；
+4. 用户点确认 → 落盘 → reload。
 
 **首次接管不提示**，否则第一次打开就弹一个毫无意义的框。
 SW 也**不会**自动 `skipWaiting` —— 打到一半被强制刷新是最糟的体验。
+
+> 一个反直觉的点：SW 的字节没变（只在 `__BUILD__` 处变了）时，浏览器也会认为它"更新了"，
+> 因为字节比对的是整个文件。所以每次 `npm run build` 都会自然触发一次更新检测，
+> 不需要手动改 `sw.js` 的任何逻辑。
 
 ---
 
@@ -226,8 +252,9 @@ SW 也**不会**自动 `skipWaiting` —— 打到一半被强制刷新是最糟
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| 改了代码，线上没变 | `index.html` / `sw.js` 被缓存 | 检查缓存头；DevTools 勾 "Update on reload" |
-| 更新后白屏 | `emptyOutDir: true` 把旧 chunk 删了 | 改回 `false`，用 postbuild 的 3 代保留 |
+| 改了代码，线上没变 | 忘了重新 build 并推 `docs/`；或 `sw.js` 命中 10 分钟缓存 | 看构建日志的构建号；本地先 `curl -s <站点>/version.json` 对一下 |
+| 页面正常，但装到桌面打开是**空白** | manifest 的 `scope` / `start_url` 是相对值 | 用绝对 base 重新构建（见 §3），检查产物里 `scope` 是否以 `/` 开头、以 `/` 结尾 |
+| 更新后白屏 | `emptyOutDir: true` 把旧 chunk 删了 | 改回 `false`，用 postbuild 的分代保留 |
 | 离线打不开 | SW 没注册（HTTP / 子路径 scope 不对） | 必须 HTTPS；确认 `sw.js` 在站点根或对应子目录 |
 | 安装提示不出现 | 缺 192/512 图标或缺 manifest | 检查 `manifest.webmanifest` 能否 200 访问 |
-| 子目录部署资源 404 | 用了绝对路径 `/assets/...` | 保持 `base: './'`，别手写绝对路径 |
+| 子目录部署资源全 404 | base 前缀和实际部署层级不一致 | 前缀必须完全对应：`https://x/games/e/` → `GHP_BASE=/games/e/` |

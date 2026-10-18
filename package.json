@@ -1,7 +1,7 @@
 {
   "name": "eartheno",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "地髓 Eartheno — 手机横屏 2D 像素沙盒建造游戏（纯前端 / 可离线）",
   "scripts": {
@@ -11,8 +11,9 @@
     "icons": "node tools/gen-icons.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "E2E_FORCE_RELATIVE=1 node tools/build.mjs && playwright test",
-    "typecheck": "tsc --noEmit"
+    "test:e2e": "node tools/build.mjs && playwright test",
+    "typecheck": "tsc --noEmit",
+    "pack": "node tools/pack.mjs"
   },
   "dependencies": {
     "phaser": "3.90.0"

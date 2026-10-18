@@ -37,6 +37,7 @@ const PAL: Record<string, Palette> = {
   plank: { base: [176, 146, 98], dark: [136, 110, 72], light: [204, 176, 126], style: 'plank' },
   torch: { base: [0, 0, 0], dark: [120, 94, 62], light: [0, 0, 0], accent: [255, 190, 90], style: 'wood' },
   crystal: { base: [110, 160, 176], dark: [78, 122, 140], light: [164, 210, 224], accent: [226, 252, 255], style: 'crystal', accentDensity: 0.05 },
+  obsidian: { base: [44, 38, 52], dark: [26, 22, 32], light: [76, 66, 92], accent: [138, 104, 196], style: 'stone', accentDensity: 0.04 },
   bedrock: { base: [46, 44, 48], dark: [30, 28, 32], light: [72, 70, 78], style: 'bedrock' },
 };
 

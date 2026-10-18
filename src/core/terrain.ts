@@ -23,6 +23,7 @@ const ID = {
   glow: idOf('glow'),
   wood: idOf('wood'),
   crystal: idOf('crystal'),
+  obsidian: idOf('obsidian'),
   bedrock: BEDROCK,
 };
 
@@ -88,6 +89,8 @@ function fillColumn(seed: number, x: number, out: Uint8Array, cy: number, rand: 
       else if (y >= 118 && veinAt(seed, x, y, 0x6666, 0.16, 0.86)) id = ID.ember;
       // 青辉晶（极深、极稀疏）
       else if (y >= 138 && veinAt(seed, x, y, 0x7777, 0.2, 0.9)) id = ID.glow;
+      // 曜岩（深处、成片）：通往青辉镐的踏板，出现得比青辉晶勤快得多
+      else if (y >= 126 && veinAt(seed, x, y, 0x9999, 0.17, 0.82)) id = ID.obsidian;
       // 晶壁（洞穴边缘的装饰，在挖洞之后填）
       // 灰噪：让大片纯色有少许变化
       else if (rand() < 0.06) id = ID.stone;
@@ -177,6 +180,9 @@ export function generateChunk(seed: number, cx: number, cy: number): Uint8Array 
     out.fill(ID.bedrock);
     return out;
   }
+  // 头顶那两行空气：显式判一下，免得以后有人把地表高度调到 0 附近时
+  // 出现"天空里飘着土"的诡异画面（老存档则已由 SAVE_FMT 2 迁移把这两行清空）
+  if (cy < 0) return out;
   // 该 chunk 若完全高于地表，直接全空
   let minSurface = Infinity;
   for (let ix = 0; ix < CHUNK; ix++) minSurface = Math.min(minSurface, surfaceY(seed, cx * CHUNK + ix));

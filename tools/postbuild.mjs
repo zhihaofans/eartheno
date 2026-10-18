@@ -123,22 +123,31 @@ const precache = all
 //   manifest   → id / start_url / scope / 图标 src
 //
 // **base 从产物里反推**，不读环境变量：看 index.html 里 Vite 自己生成的
-// script src，`/eartheno/assets/x.js` → `/eartheno/`，`./assets/x.js` → `./`。
-// 这样即使外面用 GHP_BASE 构建，这里的判断也绝不会和 Vite 打架。
+// 第一个 `.../assets/xxx.js`，取其前缀（`/eartheno/assets/x.js` → `/eartheno/`，
+// `./assets/x.js` → `./`）。这样即使外面用 GHP_BASE 构建，这里的判断也绝不会和 Vite 打架。
 //
-// manifest 里的 id 尤其重要：它是 PWA 的**身份标识**。早期版本把 id 写死成
-// "/eartheno/"，导致部署到别的仓库名时，浏览器认为"这是同一应用的另一份副本"，
-// 可能覆盖已有安装、或让 start_url 指向不存在的路径。
+// manifest 里 `scope` 尤其重要：它是 PWA 的**作用域**，也是 `id` 的默认值。
+// 相对值 `"./"` 的基准是 manifest 文件自己 —— 算出来会变成
+// `/eartheno/manifest.webmanifest` 这种以文件为前缀的非法 scope，
+// 装出来的应用打开是空白页。所以线上构建必须走绝对 base（见 vite.config.ts）。
 const htmlPath = join(DIST, 'index.html');
 if (!existsSync(htmlPath)) {
   console.error('产物里没有 index.html');
   process.exit(1);
 }
 let html = readFileSync(htmlPath, 'utf8');
-let base = './';
+let base = '/';
 {
-  const m = /<(?:script|link)[^>]+(?:src|href)="([^"]*?)assets\//.exec(html);
-  if (m) base = m[1] || './';
+  // 正则要**先匹配引号里的整个属性值，再从里面截 base**。
+  // 之前的写法是 `(?:src|href)="([^"]*?)assets\/`，非贪婪会让 `[^"]*?` 停在最先出现的
+  // "assets/"，base 永远是空串 → 退化成 './'，manifest 的 scope 又变回相对路径。
+  // 现在的写法要求"以 assets/ 结尾"才算命中，跨域 CDN（https://cdn/x/assets/）
+  // 也会被正确识别成完整前缀。
+  const m = /<(?:script|link)[^>]+(?:src|href)="([^"]*\/?assets\/[^"]*)"/.exec(html);
+  if (m) {
+    const idx = m[1].indexOf('assets/');
+    base = m[1].slice(0, idx) || '/';
+  }
 }
 if (html.includes('%BASE%')) {
   html = html.split('%BASE%').join(base);
@@ -172,6 +181,32 @@ if (existsSync(mfPath)) {
     }
   } catch (e) {
     console.error('manifest 不是合法 JSON：', e.message);
+    process.exit(1);
+  }
+}
+
+// ── 发布形态自检 ─────────────────────────────────────────
+//
+// 只报一次，落成一行构建日志。因为这两条错误**在浏览器里都不报错**，
+// 只会表现为"哪儿都不对"，事后从现象倒推极其费时：
+//
+// ① 相对 base：资源 200、页面正常，但 manifest 的 scope / start_url 是 "./"。
+//    相对值的基准是 manifest 文件自身，浏览器算出来的 scope 会变成
+//    `/eartheno/manifest.webmanifest`，装到桌面打开是空白。
+//    本地预览与 E2E 用相对 base 是**故意**的，所以这里只提醒不失败。
+// ② absolute base 与站点实际部署在同一层根路径 —— 记一下，方便对不上时排查。
+const isRelative = base === './' || base === '' || !base.startsWith('/');
+console.log(
+  isRelative
+    ? `  base = "${base}"（相对）→ manifest 的 scope/start_url 也是相对的。仅适合本地预览；线上请用 GHP_BASE=/<仓库名>/ npm run build`
+    : `  base = "${base}"（绝对）→ manifest 的 scope/start_url 都是站点绝对路径，PWA 安装后不会白屏`,
+);
+
+// manifest 里若出现"以文件名结尾的 scope"，几乎一定是相对基准算错了，直接拦下。
+if (existsSync(mfPath)) {
+  const j = JSON.parse(readFileSync(mfPath, 'utf8'));
+  if (typeof j.scope === 'string' && /\.(webmanifest|json|html)$/.test(j.scope)) {
+    console.error(`manifest 的 scope 指向了文件本身（${j.scope}），PWA 安装后会打不开`);
     process.exit(1);
   }
 }

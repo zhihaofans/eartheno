@@ -30,9 +30,10 @@ function inv(patch: (i: InventoryData) => void = () => {}): InventoryData {
 }
 
 describe('方块注册表', () => {
-  it('14 种可携带方块（16 个 id 去掉空气与界石），落在 8–15 的规格区间内', () => {
-    expect(CARRIABLE).toHaveLength(14);
+  it('15 种可携带方块（17 个 id 去掉空气与界石），正好还是规格上限 15', () => {
+    expect(CARRIABLE).toHaveLength(15);
     expect(CARRIABLE.length).toBeGreaterThanOrEqual(8);
+    // 规格写的是 8–15 种，曜岩是最后一个名额：再加方块就得先合并掉一个
     expect(CARRIABLE.length).toBeLessThanOrEqual(15);
     expect(CARRIABLE.some((b) => b.key === 'air')).toBe(false);
     expect(CARRIABLE.some((b) => b.key === 'bedrock')).toBe(false);

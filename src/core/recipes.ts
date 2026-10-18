@@ -84,7 +84,7 @@ export const RECIPES: Recipe[] = [
       { item: 'wood', n: 2 },
       { item: 'ember', n: 1 },
     ],
-    hint: '照亮矿洞的唯一办法',
+    hint: '照亮矿洞的唯一办法。也可以先把火把放进快捷栏——举着它同样看得更远',
   },
   {
     id: 'shovel_hand',
@@ -148,8 +148,19 @@ export const RECIPES: Recipe[] = [
       { item: 'glow', n: 2 },
       { item: 'copper', n: 2 },
       { item: 'wood', n: 2 },
+      { item: 'pick_copper', n: 1 },
     ],
-    hint: '最深的矿才挖得动',
+    hint: '最深处的青辉晶只有它挖得动。曜岩能用铜镐挖，镐子才转得起来',
+  },
+  {
+    id: 'building_block',
+    out: 'plank',
+    outN: 4,
+    need: [
+      { item: 'wood', n: 2 },
+      { item: 'dirt', n: 1 },
+    ],
+    hint: '不挖赭泥也能拿到香板：木头 + 夯土压实（造房子用）',
   },
 ];
 

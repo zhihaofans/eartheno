@@ -1,0 +1,27 @@
+# 依赖
+node_modules/
+
+# 测试产物
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+*.log
+
+# 本地调试脚本
+.dbg*.mjs
+
+# 注意：docs/ **不要**忽略。
+# 它是构建产物，但也是 GitHub Pages 的发布源（Settings → Pages → 分支 + /docs），
+# 必须提交进仓库，Pages 才能拿到最新版本。
+
+# 构建脚本的状态标记（记录上次用的 base，不进仓库）
+docs/.build-meta.json
+
+# 发布用压缩包（npm run pack 的产物，随时可重新生成）
+地髓Eartheno-完整仓库-*.zip

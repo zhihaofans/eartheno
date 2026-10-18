@@ -155,10 +155,40 @@ describe('地形生成', () => {
     }
   });
 
-  it('世界边界外的 chunk 全是界石（不会走出世界）', () => {
+  it('世界左右界外的 chunk 全是界石（不会走出世界）', () => {
     const out = generateChunk(1, WORLD.cxMax + 1, 0);
     expect(Array.from(new Set(out))).toEqual([BEDROCK]);
-    const out2 = generateChunk(1, 0, -1);
+    const out2 = generateChunk(1, WORLD.cxMin - 1, 0);
     expect(Array.from(new Set(out2))).toEqual([BEDROCK]);
+  });
+
+  /**
+   * 世界顶部必须留空气。
+   *
+   * 这条是「走到一定高度后地面消失」的回归：cyMin 曾经是 0，
+   * 第 0 行区块就是世界顶，稍高一点头顶和远处的地形整块消失。
+   */
+  it('世界顶部的两行区块全是空气（头顶不会被削平）', () => {
+    expect(WORLD.cyMin).toBeLessThanOrEqual(-2);
+    for (const cy of [-1, -2]) {
+      for (const cx of [0, 7, -4]) {
+        const out = generateChunk(12345, cx, cy);
+        expect(Array.from(new Set(out))).toEqual([AIR]);
+      }
+    }
+    // 再往上一行就出界了，仍然是界石（防止玩家飞出去）
+    expect(Array.from(new Set(generateChunk(1, 0, WORLD.cyMin - 1)))).toEqual([BEDROCK]);
+  });
+
+  it('曜岩出现在深层，且数量足够做一把青辉镐（不必先有青辉镐）', () => {
+    let n = 0;
+    for (let cx = 0; cx < 6; cx++) {
+      for (let cy = 4; cy <= WORLD.cyMax; cy++) {
+        const c = generateChunk(777, cx, cy);
+        for (let i = 0; i < c.length; i++) if (c[i] === idOf('obsidian')) n++;
+      }
+    }
+    // 6×5 个 chunk ≈ 每屏能碰到几块；要求至少 2 块，否则配方等于死路
+    expect(n).toBeGreaterThan(2);
   });
 });

@@ -72,10 +72,82 @@ export function onStableViewport(cb: (v: ViewportInfo) => void): () => void {
   };
 }
 
+/** 是否已经全屏（含 iOS 的 webkit 私有属性、以及"从桌面图标启动"的情况） */
+export function isFullscreenLike(): boolean {
+  const d = document as any;
+  return !!(
+    d.fullscreenElement ||
+    d.webkitFullscreenElement ||
+    d.webkitDisplayingFullscreen ||
+    isStandalone()
+  );
+}
+
+/**
+ * 尝试「横屏」：能锁横屏就锁横屏；不能锁（桌面 / iOS）就全屏，把画面最大化。
+ *
+ * 三条必须写进注释的事实，都是踩出来的：
+ * ① `orientation.lock()` 只在**全屏之后**才允许，而且必须在**用户手势的同一任务里**调用。
+ *    所以顺序永远是 requestFullscreen().then(lock)，不能反过来。
+ * ② 它同时要求 `<meta name="viewport">` 里没有 `orientation` 限制 —— 我们没写，是对的。
+ * ③ 手机上开着「方向锁定」时，系统旋转锁优先，网页锁横屏**无效**。
+ *    这种情况只能靠 requestFullscreen + 用户物理转机，或者干脆别管（横屏时软件转屏会生效）。
+ *
+ * 永不抛错：拿不到全屏锁就静默返回 false，游戏该怎么玩还怎么玩。
+ */
+export async function requestLandscape(): Promise<{ fullscreen: boolean; locked: boolean }> {
+  let fullscreen = false;
+  if (!isFullscreenLike()) {
+    const el = document.documentElement as any;
+    try {
+      if (el.requestFullscreen) await el.requestFullscreen({ navigationUI: 'hide' });
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      fullscreen = isFullscreenLike();
+    } catch {
+      /* 被拒绝（不是手势 / 策略不允许）：继续尝试锁屏，失败也无所谓 */
+    }
+  } else {
+    fullscreen = true;
+  }
+  let locked = false;
+  try {
+    const so = screen.orientation as any;
+    if (so?.lock) {
+      await so.lock('landscape');
+      locked = true;
+    }
+  } catch {
+    /* 桌面浏览器、iOS、或系统开了方向锁定：锁不上很正常 */
+  }
+  return { fullscreen, locked };
+}
+
 /** 全屏能力探测：iOS Safari 没有 requestFullscreen，就别显示一个按了没反应的按钮 */
 export function canFullscreen(): boolean {
   const el = document.documentElement as any;
   return typeof el.requestFullscreen === 'function' || typeof el.webkitRequestFullscreen === 'function';
+}
+
+/** 能否锁横屏（Android Chromium / 全屏 PWA 可以，iOS 与桌面不行） */
+export function canLockOrientation(): boolean {
+  return typeof (screen.orientation as any)?.lock === 'function';
+}
+
+/**
+ * 当前是否"被锁定为横屏"。
+ *
+ * 用途只有一个：竖屏闸门要不要继续挡人。
+ * 锁横屏成功后，手机即使物理竖着，视口也是横的（宽>高）—— 这种情况闸门天然就不显示；
+ * 但有些机型 lock 成功后视口尺寸不变，只是把画面整体旋转，这时靠这个标志放行。
+ * `screen.orientation.type` 只有在 lock 成功且设备物理方向不符时才会是 landscape-xxx，
+ * 而 `screen.orientation.angle` 在部分浏览器里不可靠，所以两个都看。
+ */
+export function isLandscapeLocked(): boolean {
+  try {
+    return String((screen.orientation as any)?.type ?? '').startsWith('landscape');
+  } catch {
+    return false;
+  }
 }
 
 export function isIos(): boolean {
@@ -91,13 +163,7 @@ export function isStandalone(): boolean {
 }
 
 export async function requestFullscreen(): Promise<void> {
-  const el = document.documentElement as any;
-  try {
-    if (el.requestFullscreen) await el.requestFullscreen({ navigationUI: 'hide' });
-    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-  } catch {
-    /* 用户拒绝或浏览器不允许：静默失败，不影响游戏 */
-  }
+  await requestLandscape();
 }
 
 /** 触感反馈（Android Chrome 有，iOS 无） */

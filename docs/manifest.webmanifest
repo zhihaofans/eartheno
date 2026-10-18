@@ -1,12 +1,12 @@
 {
-  "id": "./",
+  "id": "/eartheno/",
   "name": "地髓 Eartheno",
   "short_name": "地髓",
   "description": "横屏 2D 像素沙盒：挖开地脉，搭起自己的洞天。离线可玩，进度存在本机。",
   "lang": "zh-CN",
   "dir": "ltr",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/eartheno/index.html",
+  "scope": "/eartheno/",
   "display": "fullscreen",
   "display_override": ["fullscreen", "standalone", "minimal-ui"],
   "orientation": "landscape",
@@ -14,13 +14,20 @@
   "theme_color": "#10131a",
   "categories": ["games", "entertainment"],
   "prefer_related_applications": false,
+  "launch_handler": { "client_mode": "navigate-existing" },
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    { "src": "/eartheno/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/eartheno/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/eartheno/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/eartheno/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ],
   "screenshots": [
-    { "src": "icons/shot-landscape.png", "sizes": "1280x600", "type": "image/png", "form_factor": "wide" }
+    {
+      "src": "/eartheno/icons/shot-landscape.png",
+      "sizes": "any",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "地表与快捷栏"
+    }
   ]
 }

@@ -10,6 +10,8 @@
 export interface PwaHooks {
   /** 版本号，来自 version.json（拿不到就是 '—'，页面照常启动） */
   getBuild: () => string;
+  /** 版本号，给界面显示 `v0.2.0` 用 */
+  getVer?: () => string;
   /** 提示条 */
   banner(msg: string, actionLabel?: string, onAction?: () => void, opts?: { sticky?: boolean; kind?: 'info' | 'off' }): void;
   hideBanner(kind?: 'info' | 'off'): void;
@@ -23,9 +25,23 @@ export function versionJsonUrl(): string {
   return new URL('version.json', document.baseURI).href;
 }
 
+/**
+ * `cache-bust` 不能省：GitHub Pages 给所有静态文件（含 version.json）发的都是
+ * `cache-control: max-age=600`，光靠 `cache:'no-store'` 在某些浏览器/代理组合下
+ * 仍可能读到 10 分钟前的旧副本 —— 那样"有新版本"要等十分钟才会出现。
+ * 加一个每次都不一样的查询串就能拿到全新的 URL，彻底绕过缓存。
+ *
+ * SW 里对 version.json 有两处依赖这一点，改这里要同步：
+ * ① fetch 事件里 `pathname.endsWith('/version.json')` 走 network-only；
+ * ② 用 `ignoreSearch: true` 匹配，避免带查询串的导航请求缓存外多存一份。
+ */
+export function versionFetchUrl(): string {
+  return `${versionJsonUrl()}?cache-bust=${Date.now().toString(36)}`;
+}
+
 export async function loadVersion(): Promise<{ ver: string; build: string; note?: string }> {
   try {
-    const r = await fetch(versionJsonUrl(), { cache: 'no-store' });
+    const r = await fetch(versionFetchUrl(), { cache: 'no-store' });
     if (!r.ok) throw new Error(String(r.status));
     const j = await r.json();
     return { ver: String(j.ver ?? '—'), build: String(j.build ?? '—'), note: j.note };
@@ -61,7 +77,6 @@ export async function initPwa(h: PwaHooks): Promise<void> {
       scope: './',
       updateViaCache: 'none',
     });
-
     // 首次接管不提示；之后的 controllerchange 才是真更新
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (!hadController) return;
@@ -79,6 +94,11 @@ export async function initPwa(h: PwaHooks): Promise<void> {
     // SW 字节没变时（只在构建号变了），切前台比对 version.json 是唯一能发现的路
     const checkVersion = async () => {
       if (document.visibilityState !== 'visible') return;
+      // 先让浏览器去问一次 sw.js 有没有变，再比 version.json。
+      // 顺序有讲究：`updateViaCache:'none'` 只保证注册时那次不走缓存，
+      // 之后浏览器自己的 24h 周期检查**仍会受 HTTP 缓存主导**
+      // （GitHub Pages 是 max-age=600）。手动 update() 能把它压到"每次切前台"。
+      reg.update().catch(() => {});
       const v = await loadVersion();
       if (v.build && v.build !== '—' && h.getBuild() !== v.build) {
         // 同一会话只提示一次

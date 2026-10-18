@@ -82,21 +82,43 @@ test.describe('PWA 与适配', () => {
     expect(overflow).toEqual([]);
   });
 
+  // 这三条都**不写死根路径**：产物既可能构建在 "/"（默认），也可能构建在
+  // "/eartheno/"（线上 GitHub 项目页）。用页面里真实的 <link rel=manifest> / baseURI
+  // 去取，两种 base 都能测；写死 '/manifest.webmanifest' 只在根路径部署时才碰巧成立。
   test('manifest 可被解析且关键字段齐全', async ({ page }) => {
-    const res = await page.goto('/manifest.webmanifest');
-    const json = JSON.parse(await res!.text());
+    await openGame(page);
+    const json = await page.evaluate(async () => {
+      const href = document.querySelector('link[rel=manifest]')!.getAttribute('href')!;
+      return (await fetch(href)).json();
+    });
     expect(json.name).toContain('地髓');
     expect(json.orientation).toBe('landscape');
     expect(json.display).toBe('fullscreen');
-    expect(json.start_url).toContain('./');
+
+    // scope / start_url 的断言不写死 "./" 或 "/"：线上是 /<仓库名>/，本地是 /，
+    // 写死哪一个都会在另一套环境里假失败。真正要保证的是两件事：
+    if (json.scope) {
+      // ① scope 是个**目录**，不能以文件结尾。
+      //    相对值 "./" 的基准是 manifest 自身，算出来会变成
+      //    "/eartheno/manifest.webmanifest" —— 线上真出过这个 bug，装到桌面是空白页。
+      expect(json.scope.endsWith('/')).toBe(true);
+      expect(json.scope).not.toMatch(/\.(webmanifest|json|html)$/);
+    }
+    // ② start_url 必须落在 scope 内，否则 Chrome 直接拒绝安装。
+    const abs = (u: string) => new URL(u, 'http://x/manifest.webmanifest').pathname;
+    expect(abs(json.start_url).startsWith(abs(json.scope ?? './'))).toBe(true);
+
     const sizes = (json.icons as { sizes: string; purpose?: string }[]).map((i) => i.sizes);
     expect(sizes).toEqual(expect.arrayContaining(['192x192', '512x512']));
     expect((json.icons as { purpose?: string }[]).some((i) => i.purpose?.includes('maskable'))).toBe(true);
   });
 
   test('版本接口返回当前构建号（用于更新提示）', async ({ page }) => {
-    const res = await page.goto('/version.json');
-    const json = JSON.parse(await res!.text());
+    await openGame(page);
+    const json = await page.evaluate(async () => {
+      // 与 src/pwa.ts 的 versionFetchUrl() 同一条路径（相对 document.baseURI）
+      return (await fetch(new URL('version.json', document.baseURI))).json();
+    });
     expect(json.ver).toMatch(/^\d+\.\d+\.\d+$/);
     expect(json.build).toMatch(/^\d{8}-\d{4}-/);
   });

@@ -19,6 +19,8 @@ export class World {
   private cache = new Map<string, Uint8Array>();
   /** 有改动、待落库的 chunk */
   private dirty = new Set<string>();
+  /** chunk 键 → 生成器给的原始字节（第一次生成时顺手存一份，用于迁移比对） */
+  private pristine = new Map<string, Uint8Array>();
 
   constructor(seed: number, initial: Map<string, Uint8Array> = new Map()) {
     this.seed = seed;
@@ -39,6 +41,18 @@ export class World {
       this.cache.set(k, c);
     }
     return c;
+  }
+
+  /** 生成器对该 chunk 的"原始"结果（不破坏玩家改动）。只有被生成过才有 */
+  pristineChunk(cx: number, cy: number): Uint8Array | null {
+    if (!this.inBounds(cx, cy)) return null;
+    const k = chunkKey(cx, cy);
+    let p = this.pristine.get(k);
+    if (!p) {
+      p = generateChunk(this.seed, cx, cy);
+      this.pristine.set(k, p);
+    }
+    return p;
   }
 
   /** 已在内存中的 chunk（不改动、不生成） */
@@ -108,6 +122,15 @@ export class World {
 
   ack(keys: string[]): void {
     for (const k of keys) this.dirty.delete(k);
+  }
+
+  /**
+   * 把一个"和原版生成结果不同"的 chunk 收进来，并标记为待落库。
+   * 用途：老存档迁移（补天空行、修天空里异常生成的土）。
+   */
+  adoptEdit(key: string, blocks: Uint8Array): void {
+    this.cache.set(key, blocks);
+    this.dirty.add(key);
   }
 
   get dirtyCount(): number {

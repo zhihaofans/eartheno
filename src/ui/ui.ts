@@ -34,6 +34,7 @@ export interface UiHandlers {
   onExport(): void;
   onImport(): void;
   onNewWorld(): void;
+  onSaveNow(): void;
   onSetting(key: string, value: unknown): void;
 }
 
@@ -52,6 +53,7 @@ const ICONS = {
   place: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
   full: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+  save: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v6h7V4M8 14h8v6H8z"/></svg>',
 };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string): HTMLElementTagNameMap[K] {
@@ -109,6 +111,9 @@ export class Ui {
   private fpsEl: HTMLElement;
   private toastEl: HTMLElement;
   private sheet: HTMLElement;
+  private saveEl!: HTMLElement;
+  /** 上次写进顶栏文案的内容，避免每帧改 DOM */
+  private saveSig = '\u0000';
   panel: PanelKind = 'none';
   private activeSlot = 0;
   private inv: InventoryData | null = null;
@@ -139,10 +144,17 @@ export class Ui {
       });
       return b;
     };
-    top.append(iconBtn('btn-fullscreen', '全屏', ICONS.full, () => this.h.onSetting('__fullscreen', true)));
+    top.append(iconBtn('btn-save', '立即保存', ICONS.save, () => this.h.onSaveNow()));
+    top.append(iconBtn('btn-fullscreen', '全屏 / 横屏', ICONS.full, () => this.h.onSetting('__fullscreen', true)));
     top.append(iconBtn('btn-menu', '菜单', ICONS.menu, () => this.h.onOpenPanel('menu')));
     this.root.append(top);
     this.seedEl = top.querySelector('#seedline')!;
+
+    // 顶栏正中的"待保存"提示：让保存状态可见，而不是只存在于玩家的想象里
+    this.saveEl = el('div', 'topbar__status');
+    this.saveEl.id = 'savestate';
+    this.saveEl.hidden = true;
+    top.append(this.saveEl);
 
     // 摇杆
     const joy = el('div', 'joystick touch');
@@ -294,6 +306,23 @@ export class Ui {
       s.classList.toggle('is-active', idx === i);
       s.setAttribute('aria-selected', idx === i ? 'true' : 'false');
     });
+  }
+
+  /**
+   * 顶栏的保存状态。
+   *
+   * 有未落盘的改动时显示「N 格待保存」，全部写完后显示一次「已保存」再淡出。
+   * 只在文案变化时碰 DOM，且由 main 的帧循环调用 —— 不影响每帧预算。
+   */
+  setSaveState(dirty: number, lastSaveAt: number) {
+    const now = Date.now();
+    let text = '';
+    if (dirty > 0) text = `${dirty} 格待保存`;
+    else if (lastSaveAt && now - lastSaveAt < 2400) text = '已保存';
+    if (text === this.saveSig) return;
+    this.saveSig = text;
+    this.saveEl.textContent = text;
+    this.saveEl.hidden = !text;
   }
 
   sync(inv: InventoryData, seedText: string) {
@@ -540,18 +569,22 @@ export class Ui {
     // 存档
     const saveRow = el('div', 'row');
     saveRow.append(el('div', 'row__label', '存档'));
+    const now = el('button', 'btn touch', '立即保存');
+    now.id = 'btn-savenow';
+    now.addEventListener('click', () => this.h.onSaveNow());
     const exp = el('button', 'btn btn--primary touch', '导出存档');
     exp.id = 'btn-export';
     exp.addEventListener('click', () => this.h.onExport());
     const imp = el('button', 'btn touch', '导入存档');
     imp.id = 'btn-import';
     imp.addEventListener('click', () => this.h.onImport());
-    saveRow.append(exp, imp);
+    saveRow.append(now, exp, imp);
     saveRow.append(
       el(
         'div',
         'row__hint',
-        `${extra.chunks} 个改动过的区块 · 已游玩 ${fmtDuration(extra.playSec)} · 最近备份 ${fmtDate(s.lastExport)}`,
+        `改动会自动保存（停下约 1 秒、每 8 秒兜底、切后台必存），这个键只是让你心里有底。` +
+          `${extra.chunks} 个改动过的区块 · 已游玩 ${fmtDuration(extra.playSec)} · 最近备份 ${fmtDate(s.lastExport)}`,
       ),
     );
     body.append(saveRow);

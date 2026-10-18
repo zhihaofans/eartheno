@@ -7,7 +7,7 @@
  * - 导入必须先校验再合并，校验失败要给**具体原因**，不是一句"文件损坏"。
  */
 
-import { CHUNK, CHUNK_AREA, APP_ID, SAVE_FMT } from './constants';
+import { CHUNK, CHUNK_AREA, APP_ID, SAVE_FMT, WORLD } from './constants';
 import type { InventoryData } from './inventory';
 import { emptyInventory, sanitizeInventory } from './inventory';
 
@@ -44,6 +44,48 @@ export interface SaveFile {
   savedAt: string;
   meta: MetaState;
   chunks: ChunkSave[];
+}
+
+/** 存档格式版本。2 = 世界顶部上移两行（cyMin 0 → -2），老存档需要补天空 */
+export const SAVE_FMT_CURRENT = 2;
+
+/**
+ * 老存档（fmt < 2）的"天空行"迁移。
+ *
+ * 何时需要：早期 WORLD.cyMin 是 0，世界顶就是第 0 行区块 —— 走到稍高处头顶就没东西了，
+ * 远处的山也整片消失。修法是把顶部上移两行（cyMin = -2），但老存档里凡是被改过的
+ * chunk，整块字节都会从数据库原样读回；-2/-1 这两行读回来是全 0（空气），看着没问题。
+ *
+ * 真正的坑在另一处：旧版生成器对这个高度**没有**"必定空气"的保证 —— 万一某天
+ * 地表生成参数改动，sky 行被填了土，读档时就是"天上一块土"。所以这里顺手校验：
+ * 与**当前**生成器结果逐字节比对，只替换不同的部分，玩家挖过的地方原样保留。
+ *
+ * @param chunks 读档得到的 chunk 表（键为 "cx,cy"），**原地修改**
+ * @returns 是否真的改动了任何 chunk
+ */
+export function migrateSkyRows(
+  chunks: Map<string, Uint8Array>,
+  gen: (cx: number, cy: number) => Uint8Array | null,
+): boolean {
+  let touched = false;
+  for (let cy = WORLD.cyMin; cy < 0; cy++) {
+    for (let cx = WORLD.cxMin; cx <= WORLD.cxMax; cx++) {
+      const k = chunkKey(cx, cy);
+      const cur = chunks.get(k);
+      if (!cur) continue; // 没存过 = 读档时会按新生成器生成，本身就是干净的
+      const ref = gen(cx, cy);
+      if (!ref) continue;
+      let diff = false;
+      for (let i = 0; i < cur.length; i++) {
+        if (cur[i] !== ref[i]) {
+          cur[i] = ref[i];
+          diff = true;
+        }
+      }
+      if (diff) touched = true;
+    }
+  }
+  return touched;
 }
 
 export function newMeta(seed: number, spawn: { x: number; y: number }): MetaState {

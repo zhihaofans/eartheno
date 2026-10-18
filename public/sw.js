@@ -60,6 +60,8 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return; // 跨域资源交给浏览器默认策略
 
   // 导航：network-first，断网回落 index.html
+  // 用 `ignoreSearch` 匹配：`/eartheno/?utm=x` 这类带查询串的首次访问要能命中
+  // 预缓存里的 `index.html`，否则断网重开是一片 503。
   if (req.mode === 'navigate') {
     event.respondWith(
       (async () => {
@@ -70,7 +72,10 @@ self.addEventListener('fetch', (event) => {
           return fresh;
         } catch {
           const cache = await caches.open(CACHE_NAME);
-          const cached = (await cache.match(req)) || (await cache.match('./index.html')) || (await cache.match('index.html'));
+          const cached =
+            (await cache.match(req, { ignoreSearch: true })) ||
+            (await cache.match('./index.html', { ignoreSearch: true })) ||
+            (await cache.match('index.html', { ignoreSearch: true }));
           if (cached) return cached;
           return new Response('离线且没有缓存', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
         }
@@ -79,17 +84,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 版本文件永远走网络（离线时给个空壳，避免页面卡在"检查更新"）
+  // 版本文件永远走网络（离线时给个空壳，避免页面卡在"检查更新"）。
+  // 页面会带 `?cache-bust=...` 来绕开 GitHub Pages 的 max-age=600，
+  // 这里不能把它存进缓存 —— 每条查询串都是新 key，会把 Cache Storage 撑成一堆垃圾。
   if (url.pathname.endsWith('/version.json')) {
     event.respondWith(fetch(req).catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } })));
     return;
   }
 
-  // 静态资源：stale-while-revalidate
+  // 静态资源：stale-while-revalidate。
+  // `ignoreSearch: true` 让 `app.js?v=123` 命中 `app.js` 的缓存条目；
+  // 本项目自产的资源 URL 本身不带查询串，只有"故意换 URL 逼浏览器重取"时会带上。
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE_NAME);
-      const cached = await cache.match(req);
+      const cached = await cache.match(req, { ignoreSearch: true });
       const network = fetch(req)
         .then((res) => {
           if (res && res.ok) cache.put(req, res.clone()).catch(() => {});

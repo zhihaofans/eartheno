@@ -10,21 +10,22 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="地髓" />
-    <!-- 用 ./ 占位，由 tools/postbuild.mjs 按实际 base 替换成 "./" 或 "/<仓库名>/"。
+    <!-- 用 /eartheno/ 占位，由 tools/postbuild.mjs 按实际 base 替换成 "./" 或 "/<仓库名>/"。
          为什么不留裸相对路径：深层 URL（/repo/a/）会把 "icons/x.png" 解析到错误层级；
          而写死 "/" 又会让子目录部署全部 404。交给构建时决定才两边都对。 -->
-    <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="icon" href="./icons/favicon-32.png" sizes="32x32" type="image/png" />
-    <link rel="apple-touch-icon" href="./icons/apple-180.png" />
+    <link rel="manifest" href="/eartheno/manifest.webmanifest" />
+    <link rel="icon" href="/eartheno/icons/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/eartheno/icons/apple-180.png" />
     <title>地髓 Eartheno</title>
-    <script type="module" crossorigin src="./assets/index-CjizlZQO.js"></script>
-    <link rel="modulepreload" crossorigin href="./assets/phaser-0YPJO2g1.js">
-    <link rel="stylesheet" crossorigin href="./assets/style-BgU-1fxP.css">
+    <script type="module" crossorigin src="/eartheno/assets/index-DmtwtLE2.js"></script>
+    <link rel="modulepreload" crossorigin href="/eartheno/assets/phaser-0YPJO2g1.js">
+    <link rel="stylesheet" crossorigin href="/eartheno/assets/style-BoWIHthW.css">
   </head>
   <body>
     <div id="game" aria-label="游戏画面"></div>
 
-    <!-- 竖屏闸门 -->
+    <!-- 竖屏闸门。手机锁了方向时，"请横过来"本身没用 —— 必须给一条自救路径，
+         所以这里带一个按钮：全屏 + 锁横屏（只能在用户手势里调，按钮就是那个手势）。 -->
     <div id="orient-gate" class="gate" hidden>
       <svg viewBox="0 0 64 64" class="gate__icon" aria-hidden="true">
         <rect x="22" y="8" width="20" height="34" rx="4" fill="none" stroke="currentColor" stroke-width="3" />
@@ -33,6 +34,10 @@
       </svg>
       <div class="gate__title">请把手机横过来</div>
       <div class="gate__sub">地髓是横版世界，横屏才能看见脚下的矿脉。</div>
+      <div class="gate__actions">
+        <button class="btn btn--primary touch" id="gate-landscape">自动横屏（全屏）</button>
+        <div class="gate__hint" id="gate-hint" hidden></div>
+      </div>
     </div>
 
     <!-- 启动 / 读档中的遮罩 -->

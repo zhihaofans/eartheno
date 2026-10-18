@@ -43,6 +43,9 @@ export const BLOCKS: BlockDef[] = [
   { id: 13, key: 'torch', name: '火把', hardness: 0, tool: 'hand', tier: 0, solid: false, light: 1, placeable: true },
   { id: 14, key: 'crystal', name: '晶壁', hardness: 2, tool: 'pick', tier: 1, solid: true, light: 0.15, placeable: true },
   { id: 15, key: 'bedrock', name: '界石', hardness: -1, tool: 'hand', tier: 0, solid: true, light: 0, placeable: false },
+  // 深层高密度岩：比青辉晶常见得多，是通往"青辉镐"的踏板。
+  // 没有它的话，想挖青辉晶得先有青辉镐 —— 一个死循环（玩家会以为游戏坏了）。
+  { id: 16, key: 'obsidian', name: '曜岩', hardness: 4, tool: 'pick', tier: 3, solid: true, light: 0.1, placeable: true },
 ];
 
 export const AIR = 0;

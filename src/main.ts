@@ -10,10 +10,10 @@ import { buildBlockTextures } from './art/blocks';
 import { buildToolIcons } from './art/character';
 import { blockByKey } from './core/blocks';
 import { CHUNK, TILE, WORLD } from './core/constants';
-import { newMeta, importSave, makeSaveFile, encodeSave, type MetaState } from './core/save';
+import { newMeta, importSave, makeSaveFile, encodeSave, migrateSkyRows, type MetaState } from './core/save';
 import { loadSettings, saveSettings, normalizeSettings, type Settings } from './core/settings';
 import { seedFromText, seedToText, randomSeed } from './core/rng';
-import { findSpawn, SEA_LEVEL } from './core/terrain';
+import { findSpawn } from './core/terrain';
 import { add, autoHotbar, count } from './core/inventory';
 import { RECIPES, type Recipe } from './core/recipes';
 import { craft } from './core/inventory';
@@ -23,10 +23,13 @@ import { registerArt } from './game/artRuntime';
 import { sound } from './game/audio';
 import {
   canFullscreen,
+  canLockOrientation,
+  isLandscapeLocked,
   isPortrait,
+  isStandalone,
   onStableViewport,
   readViewport,
-  requestFullscreen,
+  requestLandscape,
   vibrate,
 } from './game/viewport';
 import { World } from './game/world';
@@ -60,13 +63,6 @@ async function boot() {
   const verP = loadVersion();
   applyOrientationGate();
 
-  // 启动期间顺手请求锁横屏（Android Chromium 支持；iOS 不支持，靠闸门提示）
-  try {
-    (screen.orientation as any)?.lock?.('landscape')?.catch(() => {});
-  } catch {
-    /* ignore */
-  }
-
   appMeta = await verP;
 
   try {
@@ -98,6 +94,10 @@ async function boot() {
 
   // 必须先建世界，ensureFreeSpot 要用它判可站立点
   world = new World(meta.seed, chunks);
+  if (loaded && migrateSkyRows(chunks, (cx, cy) => world.pristineChunk(cx, cy))) {
+    // 迁移出来的"头顶空气"也得落库，否则下次读档又要重算一遍
+    for (const [key, blocks] of chunks) world.adoptEdit(key, blocks);
+  }
   ensureFreeSpot();
   activeSlot = meta.player.active ?? 0;
 
@@ -131,16 +131,85 @@ async function boot() {
   exposeDebug();
 }
 
+/**
+ * 竖屏闸门 + 横屏自救。
+ *
+ * 背景：手机开了「方向锁定」时，`screen.orientation.lock('landscape')` **会被系统忽略**
+ * （系统旋转锁优先于网页锁），所以只在上线时喊一句"请横过来"等于没解决。
+ *
+ * 现在的策略：
+ * ① 启动时不再裸调 lock() —— 不在用户手势里调用本来就会失败，
+ *    且在 Safari 上会往控制台甩一个 rejected promise，纯噪音。
+ * ② 网关里给一个「自动横屏（全屏）」按钮：在用户手势里先全屏、再锁横屏。
+ *    锁成功 = 手机物理竖着也能得到横屏画面；锁不上 = 至少全屏了，少一圈浏览器栏。
+ * ③ 用户随手一碰（任意点击）也尝试一次 —— 多数浏览器允许在全屏点击时锁屏，
+ *    这次失败不打扰用户，只记下来。
+ * ④ 哪天真横过来了，闸门自己消失（不管是被锁横屏还是用户物理转机）。
+ */
+let landscapeTried = 0;
+
 function applyOrientationGate() {
   const gate = $('orient-gate');
-  const apply = (portrait: boolean) => {
-    gate.hidden = !portrait;
+  const hint = $('gate-hint') as HTMLElement;
+  const btn = $('gate-landscape') as HTMLButtonElement;
+
+  const showHint = (msg: string) => {
+    hint.textContent = msg;
+    hint.hidden = false;
   };
+
+  const apply = (portrait: boolean) => {
+    // 锁横屏时即使物理竖着，画面也已经是横的 —— 不该再挡住用户
+    const blocked = portrait && !isLandscapeLocked();
+    gate.hidden = !blocked;
+    document.body.classList.toggle('gate-open', blocked);
+  };
+
+  // 全屏都做不到（iOS Safari、桌面窄窗口）：按钮换成"说明"，不要留一个点了没反应的键
+  if (!canFullscreen() && !isStandalone()) {
+    btn.hidden = true;
+    showHint(
+      'iPhone 上网页无法强制全屏：请用 Safari 菜单的「隐藏工具栏」，或从「分享 → 添加到主屏幕」打开。',
+    );
+  } else if (!canLockOrientation()) {
+    showHint('这台设备不支持网页锁横屏：点上面的按钮进入全屏后，把手机转过来即可。');
+  }
+
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    landscapeTried++;
+    btn.disabled = true;
+    btn.textContent = '正在切换…';
+    const r = await requestLandscape();
+    btn.disabled = false;
+    btn.textContent = '自动横屏（全屏）';
+    if (r.locked) {
+      // 锁成功：有些机型锁屏后不派发 resize 事件，这里手动再判一次闸门
+      apply(isPortrait());
+    } else if (r.fullscreen) {
+      showHint('已进入全屏。系统若仍锁着竖屏，需要在手机快捷开关里关掉「方向锁定」。');
+    } else {
+      showHint('浏览器拒绝了全屏。请从手机下拉菜单关掉「方向锁定」后转动手机。');
+    }
+  });
+
   apply(isPortrait());
   onStableViewport((v) => {
     apply(isPortrait(v));
     if (scene) scene.scale.resize(v.w, v.h);
   });
+
+  // 用户第一次碰屏幕时再试一次锁屏（很多浏览器把"全屏中的点击"当作有效手势）。
+  // 只试一次，失败就彻底放弃 —— 不能让玩家每点一下都触发一次全屏请求。
+  window.addEventListener(
+    'pointerdown',
+    () => {
+      if (landscapeTried++ > 0) return;
+      if (!isPortrait() || !canLockOrientation()) return;
+      void requestLandscape().then(() => window.setTimeout(() => apply(isPortrait()), 260));
+    },
+    { passive: true },
+  );
 }
 
 /**
@@ -197,8 +266,9 @@ function startGame() {
     onExport: () => void doExport(),
     onImport: () => void doImport(),
     onNewWorld: () => void doNewWorld(),
+    onSaveNow: () => void doSaveNow(),
     onSetting: (k, val) => {
-      if (k === '__fullscreen') void requestFullscreen();
+      if (k === '__fullscreen') void requestLandscape();
       else applySetting(k, val);
     },
   });
@@ -292,11 +362,31 @@ function frameLoop() {
   if (scene.consumeDirtyNotice()) {
     /* 世界已变，UI 在上面的 sync 里已刷新 */
   }
+  ui.setSaveState(world.dirtyCount, lastSaveAt);
 }
 
 let uiNeedsSync = true;
 function syncUi(force = false) {
   if (force) uiNeedsSync = true;
+}
+
+/**
+ * 手动存一次。
+ *
+ * 为什么必须有这个按钮：自动落盘是「改动后 700ms 去抖 + 每 8 秒兜底 + 切后台」，
+ * 玩家挖完一块石头就切后台，理论上早就存了 —— 但**没有任何可见证据**。
+ * 于是"我是不是白挖了"变成每次退出都要担心一遍的事。
+ * 顶栏那个「N 格待保存」小提示 + 这条手动通道，就是把隐性状态变成显性承诺。
+ */
+async function doSaveNow() {
+  const dirty = world ? world.dirtyCount : 0;
+  await flushAll();
+  if (memoryOnly) {
+    toast('这台浏览器不让写本地存储，进度只在本次会话里有效', 'warn');
+    return;
+  }
+  toast(dirty > 0 ? `已保存（${dirty} 个区块）` : '已保存');
+  vibrate(8);
 }
 
 // ── 操作 ────────────────────────────────────────────────
@@ -725,11 +815,19 @@ function exposeDebug() {
       const cy = (scene.body.y * TILE - tl.y) * zoom;
       return {
         /** 压暗强度 0~0.86，0 表示完全不压 */
-        amount: Math.min(0.86, Math.max(0, (scene.body.y - (SEA_LEVEL + 4)) / 32)),
+        amount: scene.darknessAmount,
+        /** 暗层图形对象是否可见 —— 渲染开关，与 amount 是两回事 */
+        visible: scene.darkLayerVisible,
+        /** 本帧暗层是否真的重绘过（update 里因为"没到深度"而提前 return 时为 false） */
+        painted: scene.darkPainted,
+        /**
+         * 采样计数：每次暗层真正 fillRect 就 +1。
+         * 用例里用它判断"我要测的画面已经画出来了吗"，比等固定毫秒数可靠得多。
+         */
+        pass: scene.darkPass,
         /** 光圈圆心在屏幕上的位置（应落在画布内） */
         center: { x: cx, y: cy },
         canvas: { w: cam.width, h: cam.height },
-        visible: scene.darkLayerVisible,
       };
     },
     /** 强制存档落库（等价于切后台） */
@@ -771,4 +869,4 @@ boot().catch((e) => {
   $('boot-text').textContent = `启动失败：${(e as Error).message}`;
 });
 void Phaser;
-void requestFullscreen;
+  void requestLandscape();

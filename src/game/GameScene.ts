@@ -59,6 +59,8 @@ interface ChunkView {
   image: Phaser.GameObjects.Image;
   dirty: boolean;
   lastUsed: number;
+  /** 是否为视口外的"背景层"（见 styleFar） */
+  far: boolean;
 }
 
 const VIEW_CAP = 24;
@@ -286,6 +288,25 @@ export class GameScene extends Phaser.Scene {
     return this.darkness.visible;
   }
 
+  /**
+   * 暗层的重绘计数与"这一帧是否重绘"标记，只给自动化测试用。
+   *
+   * 为什么需要它：暗度是按 body.y 算的，而角色 teleport 之后还要下落几格，
+   * 中间若干帧 amount 是 0.3~0.6 的过渡值；光等 onGround 也不够 —— 落地瞬间
+   * 贴地校正会让 onGround 反复横跳。用例需要的是"暗层已经按最终位置画出来了"，
+   * 而这个计数恰好就是这个事实的充分必要证据。
+   */
+  darkPass = 0;
+  darkPainted = false;
+
+  /**
+   * 仅供自动化测试：临时关掉暗层，用来做"同一格有暗层 / 没暗层"的亮度对比。
+   * 这比"岩壁比空洞亮"可靠得多 —— 后者受背景层与纹理抖动影响，本质是在测随机种子。
+   */
+  setDarkLayerForTest(on: boolean): void {
+    this.darkness.setVisible(on);
+  }
+
   consumeDirtyNotice(): boolean {
     const d = this.dirtyNotice;
     this.dirtyNotice = false;
@@ -464,6 +485,20 @@ export class GameScene extends Phaser.Scene {
     this.applyZoom();
   }
 
+  /**
+   * 暗部强度是否跟随深度变化。
+   *
+   * 「自动」档下这个开关是**关**的 —— 这是被实机截图逼出来的决定，不是审美问题：
+   * 「自动」会按帧率从 high 掉到 mid，而 mid 我原来按"稍弱一点"设计，
+   * 结果同一口矿洞，一台手机上漆黑一片、另一台手机上灰蒙蒙，
+   * 玩家会以为是 bug（"为什么我朋友的地下能看清，我的全黑"）。
+   * 现在只有「低画质」明确关掉暗层，high 与 mid 画面完全一致，不再有"看不清"的档位。
+   * 属性保留给需要单独调节的场合（调试、E2E 断言）。
+   */
+  get depthDarkening(): boolean {
+    return this.quality !== 'low';
+  }
+
   private applyZoom() {
     const cam = this.cameras.main;
     const w = cam.width || this.scale.width;
@@ -583,17 +618,60 @@ export class GameScene extends Phaser.Scene {
    * 现在改成「把玩家周围从黑层里擦掉」：destination-out 径向渐变擦出一个软边圆，
    * 光晕才真正是"光"。火把只是把半径加大一点（有火把 = 看得更远）。
    */
+  /**
+   * 地下压暗强度 0~0.86。
+   *
+   * 阈值必须跟着**地形**走，不能拍脑袋写死数字。
+   * 平地地表大约在 y≈77，山谷能低到 y≈86 —— 早先写成 70 起步，
+   * 结果站在地表就有一层 0.2 的灰，白天看着像加了滤镜。
+   * 现在以海平面（SEA_LEVEL）为基准：地表及浅处完全不压，
+   * 从海平面下 4 格开始变暗，到海平面下 36 格达到 0.86（最深处的暗度）。
+   *
+   * 位置取脚下的地面高度（body.y 回落 1 格）而不是脚底本身：
+   * 脚底永远贴着地面，用脚底会让"跳起来"的那一瞬间暗度跟着变，画面会呼吸。
+   */
+  get darknessAmount(): number {
+    return clamp((this.body.y - 1 - (SEA_LEVEL + 4)) / 32, 0, 0.86);
+  }
+
+  /**
+   * 手里举着东西时视野会变亮。
+   *
+   * 取「手持工具」**或**「快捷栏选中火把」—— 以前只认手持工具，
+   * 于是"挖到火把、切到火把格"这件玩家以为在照明的事，其实什么都没发生。
+   * 不单独做一次火光判定：那需要扫描范围内所有火把方块，代价在低端机上不值当。
+   */
+  private get litByTool(): boolean {
+    if (toolById(this.inv.tools.held)) return true;
+    const sel = this.inv.hotbar[this.activeSlot];
+    return sel === 'torch' && count(this.inv, 'torch') > 0;
+  }
+
+  /**
+   * 地下暗部。
+   *
+   * 这段是**纯观感**，反复改过四五版，把结论写在这里，免得下次又绕回去：
+   *
+   * ① 不能"整屏铺黑 + 玩家周围挖个洞"（火把光圈的思路）。
+   *    横版剖面上，洞穴是"你想看清的墙"，岩层是"你想挖的东西"，两者是同一批像素；
+   *    一个以玩家为中心的圆光只会把玩家脚边照亮，**自己要挖的那一格反而是黑的**。
+   *    实机截图里的表现是"一束白光打在身上，洞穴看不清"，比不压暗还难受。
+   *    所以光不能用点光源，得用"环境光衰减"：越深越暗，但暗得均匀。
+   *
+   * ② 空洞（空气）要比岩层更暗。
+   *    这一条决定了"这是洞穴还是隧道"。只在岩层上叠加暗层，空气处只剩天空/背景色，
+   *    两边的亮度差立刻把空间感交代清楚 —— 玩家一眼能看出"我在一条通道里"。
+   *    实现上现在靠"暗层只盖岩层"：空洞处露出身后的背景，天然更深。
+   *
+   * ③ 挖的那一格必须有光照提醒。
+   *    aim 高亮已经是金色描边，暗到 0.8 也还看得见，不需要额外的光斑。
+   */
   private updateDarkness() {
     const g = this.darkness;
+    this.darkPainted = false;
     if (!g.visible) return;
     const cam = this.cameras.main;
-    const y = this.body.y;
-    // 阈值必须跟着**地形**走，不能拍脑袋写死数字。
-    // 平地地表大约在 y≈77，山谷能低到 y≈86 —— 早先写成 70 起步，
-    // 结果站在地表就有一层 0.2 的灰，白天看着像加了滤镜。
-    // 现在以海平面（SEA_LEVEL）为基准：地表及浅处完全不压，
-    // 从海平面下 4 格开始变暗，到海平面下 36 格达到 0.86（最深处的暗度）。
-    const a = clamp((y - (SEA_LEVEL + 4)) / 32, 0, 0.86);
+    const a = this.darknessAmount;
     g.clear();
     if (a <= 0.01) return;
 
@@ -611,52 +689,55 @@ export class GameScene extends Phaser.Scene {
     const w = br.x - tl.x + pad * 2;
     const h = br.y - tl.y + pad * 2;
 
+    // 底色：整屏压暗。这一层管的是"空气有多黑"。
     g.fillStyle(0x06060a, a);
     g.fillRect(x0, y0, w, h);
+    this.darkPass++;
+    this.darkPainted = true;
 
-    // 玩家位置（世界像素）
-    const cx = this.body.x * TILE;
-    const cy = this.body.y * TILE;
-
-    const held = toolById(this.inv.tools.held);
-    // 光圈半径用"世界像素"，因此会跟着 zoom 一起放大 —— 观感上视野固定，
-    // 这正是想要的：放大看时不该看到更小的光斑。
-    const base = 46 + Math.min(56, (y - 76) * 0.35);
-    const r = held ? base * 1.55 : base;
-
-    // 用「由外向内叠擦」近似径向渐变（Graphics 没有原生渐变填充）。
-    //
-    // 两个都踩过的坑：
-    //  ① 每圈用同一个 alpha → 相邻圈叠加后边缘跳变，看起来是一圈圈**同心环**。
-    //  ② 按面积份额反解 alpha 再叠 22 圈 → 累积擦除趋近 1，圆圈变成**纯白实心**。
-    // 正确做法：先定"半径 t 处希望累计擦掉多少"，再逐圈反解。
-    // 擦除是乘性的（剩余 *= 1-α），所以必须递推 `prevRemain`，不能各圈独立算。
-    g.setBlendMode(Phaser.BlendModes.ERASE);
-    // 环数：14 圈时在暗底上仍能看出一圈圈的"阶梯"（亮度差越过 1 个 8bit 色阶）。
-    // 28 圈把每圈步长压到 1 色阶以内，就成了连续的雾。
-    const rings = 28;
-    // 中心擦掉 0.9：留 10% 暗，灯下保持"夜色里的照明"感。
-    // 原来给到 0.99 时，岩层纹理被擦成一片纯白 —— 擦太干净比擦不干净更难看。
-    const core = 0.9;
-    const erasedAt = (t: number) => {
-      const u = 1 - t; // 中心 u=1，边缘 u=0
-      // 只用 smoothstep：线性项会在中心留一块"平台"，看起来像灯泡正下方一块亮斑
-      return core * u * u * (3 - 2 * u);
-    };
-    for (let i = rings; i >= 1; i--) {
-      const t = i / rings;
-      const prevRemain = 1 - erasedAt((i + 1) / rings); // 外一圈擦完后还剩多少
-      const nowRemain = 1 - erasedAt(t); // 这一圈擦完后想剩下多少
-      if (nowRemain >= prevRemain) continue;
-      const aRing = clamp(1 - nowRemain / prevRemain, 0, 0.98);
-      g.fillStyle(0xffffff, aRing);
-      g.fillCircle(cx, cy, r * t);
-    }
-    g.setBlendMode(Phaser.BlendModes.NORMAL);
-
-    // 一抹暖色，避免"擦出来的洞"看起来是冷灰色（只在有火把/工具时）
-    if (held) {
-      g.fillStyle(0xffb066, 0.05);
+    // 手里举着光源时，玩家周围一圈的**空气**稍微透亮一点（看得见通道延伸的方向）。
+    // 只在有光源时出现 —— 没火把的人不该有这层"透视"。
+    const lit = this.litByTool;
+    if (lit) {
+      const cx = this.body.x * TILE;
+      // 圆心抬到胸口：用脚底时，站在坑里往下挖会发现"两边亮、脚下黑"，
+      // 而玩家最需要看清的恰恰是脚下和身前那一格。
+      const cy = (this.body.y - 1.0) * TILE;
+      const base = 48 + Math.min(56, Math.max(0, this.body.y - 76) * 0.35);
+      const r = base * 1.45;
+      // 用「由外向内叠擦」近似径向渐变（Graphics 没有原生渐变填充）。
+      //
+      // 两个都踩过的坑：
+      //  ① 每圈用同一个 alpha → 相邻圈叠加后边缘跳变，看起来是一圈圈**同心环**。
+      //  ② 按面积份额反解 alpha 再叠 22 圈 → 累积擦除趋近 1，圆圈变成**纯白实心**。
+      // 正确做法：先定"半径 t 处希望累计擦掉多少"，再逐圈反解。
+      // 擦除是乘性的（剩余 *= 1-α），所以必须递推 `prevRemain`，不能各圈独立算。
+      g.setBlendMode(Phaser.BlendModes.ERASE);
+      // 环数：14 圈时在暗底上仍能看出一圈圈的"阶梯"（亮度差越过 1 个 8bit 色阶）。
+      // 28 圈把每圈步长压到 1 色阶以内，就成了连续的雾。
+      const rings = 28;
+      // 中心擦掉 0.8：核心区域在暗底上几乎回到原色，边缘再自然过渡到"全黑"。
+      // 早先给到 0.9 时，擦得太干净、渐变又太陡，看起来像一盏聚光灯打在角色身上；
+      // 现在半径放大、衰减放缓，读起来是"通道里有一点微光"。
+      const core = 0.8;
+      const erasedAt = (t: number) => {
+        const u = 1 - t;
+        // 线性为主（u），叠一点 smoothstep 让边缘更软。
+        // 纯 smoothstep 会聚成亮斑，纯线性又会在外缘留一道硬边。
+        return core * (0.62 * u + 0.38 * u * u * (3 - 2 * u));
+      };
+      for (let i = rings; i >= 1; i--) {
+        const t = i / rings;
+        const prevRemain = 1 - erasedAt((i + 1) / rings); // 外一圈擦完后还剩多少
+        const nowRemain = 1 - erasedAt(t); // 这一圈擦完后想剩下多少
+        if (nowRemain >= prevRemain) continue;
+        const aRing = clamp(1 - nowRemain / prevRemain, 0, 0.98);
+        g.fillStyle(0xffffff, aRing);
+        g.fillCircle(cx, cy, r * t);
+      }
+      g.setBlendMode(Phaser.BlendModes.NORMAL);
+      // 一抹暖色，避免"透出来的那一圈"看起来是冷灰色
+      g.fillStyle(0xffb066, 0.04);
       g.fillCircle(cx, cy, r * 0.7);
     }
   }
@@ -723,38 +804,69 @@ export class GameScene extends Phaser.Scene {
     g.fillRect(0, horizon - 18, w, 26);
   }
 
-  /** 只渲染视口附近的 chunk；离屏的按 LRU 淘汰 */
+  /**
+   * 只渲染视口附近的 chunk；离屏的按 LRU 淘汰。
+   *
+   * 视野分两级：
+   * - **活动层**（相机世界矩形 ±1 chunk）：正常绘制；
+   * - **背景层**（再往外各扩 1 chunk）：降透明、禁混合，只用来把"世界左右边界"
+   *   到"屏幕边缘"之间补满。没有它，走到贴着世界边界的地方，屏幕边上就是突兀的断口；
+   *   用正常透明度它又会变成"另一堵墙"压在剖面上（见 styleFar 的注释）。
+   */
   private updateChunks() {
     const cam = this.cameras.main;
     const wv = cam.worldView;
-    const x0 = Math.floor(wv.x / (CHUNK * TILE)) - 1;
-    const x1 = Math.floor(wv.right / (CHUNK * TILE)) + 1;
-    const y0 = Math.max(WORLD.cyMin, Math.floor(wv.y / (CHUNK * TILE)) - 1);
-    const y1 = y0 + 1; // 竖屏只看得见 1~2 行 chunk，空 chunk 行不建视图（省一大半 canvas）
+    const pxW = CHUNK * TILE;
+    const x0 = Math.floor(wv.x / pxW) - 1;
+    const x1 = Math.floor(wv.right / pxW) + 1;
+
+    // ── 竖向范围必须按**屏幕实际高度**算，不能写死两行 ──
+    //
+    // 这里曾经写成 `y1 = y0 + 1`，注释理由是"竖屏只看得见 1~2 行 chunk"。
+    // 在 844×390 的手机横屏下恰好成立，但换到桌面浏览器 / 平板 / 高分屏
+    // （视口高度 500~1100px）就会露馅：两行 chunk 只有 64 格 = 1024 世界像素，
+    // 视口一旦高于这个数，**下半屏就是空的** —— 表现为"地面凭空消失，人悬在半空"。
+    // 现在按真实视口算出需要几行，再多留 1 行余量（相机 lerp / 震动时不会露边）。
+    const rowH = pxW; // 1 个 chunk 在世界坐标里的高度（像素）
+    // 用 cam.height 而不是 wv.height：zoom 恒为 1，两者数值相同，
+    // 但 worldView 是 preRender 里算的缓存，update() 阶段可能还是上一帧的。
+    const rows = Math.max(2, Math.ceil(cam.height / rowH) + 3);
+    const y0 = Math.max(WORLD.cyMin, Math.floor(wv.y / rowH) - 1);
+    const y1 = Math.min(WORLD.cyMax, y0 + rows - 1);
+    const fx0 = x0 - 1;
+    const fx1 = x1 + 1;
     const now = performance.now();
 
     for (let cy = y0; cy <= y1; cy++) {
-      for (let cx = x0; cx <= x1; cx++) {
+      for (let cx = fx0; cx <= fx1; cx++) {
         if (!this.world.inBounds(cx, cy)) continue;
-        const empty = this.world.isChunkEmpty(cx, cy);
+        const core = cx >= x0 && cx <= x1;
         const key = `${cx},${cy}`;
         let v = this.views.get(key);
-        if (empty && !v) continue;
         if (!v) {
+          if (this.world.isChunkEmpty(cx, cy)) continue;
+          // 背景层不值得为它开一张新 canvas：只有已经存在的才升级成背景
+          if (!core) continue;
           v = this.createView(cx, cy);
           this.views.set(key, v);
         } else if (v.dirty) {
           this.paintView(v);
         }
+        this.styleFar(v, !core);
         v.lastUsed = now;
         v.image.setVisible(true);
       }
     }
 
-    if (this.views.size > this.viewCap) {
-      const arr = [...this.views.values()].filter((v) => v.cx < x0 || v.cx > x1 || v.cy < y0 || v.cy > y1);
+    // 淘汰上限也必须跟着"实际需要的视图数"走。
+    // 原来固定 24（低画质 14），是按"竖向 ≤2 行"估的：横屏 5 列 × 2 行 + 背景层 ≈ 18。
+    // 竖向范围改成按屏幕高度算之后，桌面/平板可能要 4~5 行 × 7 列 ≈ 30+ 个视图，
+    // 固定上限会把正在用的视图立刻淘汰重建 —— 表现为画面持续闪烁 + 帧率暴跌。
+    const cap = Math.max(this.viewCap, (fx1 - fx0 + 1) * (y1 - y0 + 1) + 4);
+    if (this.views.size > cap) {
+      const arr = [...this.views.values()].filter((v) => v.cx < fx0 || v.cx > fx1 || v.cy < y0 || v.cy > y1);
       arr.sort((a, b) => a.lastUsed - b.lastUsed);
-      const need = this.views.size - this.viewCap;
+      const need = this.views.size - cap;
       for (let i = 0; i < Math.min(need, arr.length); i++) {
         const v = arr[i];
         this.textures.remove(this.textureKey(v));
@@ -763,7 +875,8 @@ export class GameScene extends Phaser.Scene {
       }
     }
     for (const v of this.views.values()) {
-      if (v.cx < x0 || v.cx > x1 || v.cy < y0 || v.cy > y1) v.image.setVisible(false);
+      if (v.cx < fx0 || v.cx > fx1 || v.cy < y0 || v.cy > y1) v.image.setVisible(false);
+      else v.image.setVisible(true);
     }
   }
 
@@ -779,9 +892,26 @@ export class GameScene extends Phaser.Scene {
     if (this.textures.exists(texKey)) this.textures.remove(texKey);
     this.textures.addCanvas(texKey, canvas);
     const image = this.add.image(cx * CHUNK * TILE, cy * CHUNK * TILE, texKey).setOrigin(0, 0).setDepth(1);
-    const v: ChunkView = { key: `${cx},${cy}`, cx, cy, canvas, image, dirty: true, lastUsed: 0 };
+    const v: ChunkView = { key: `${cx},${cy}`, cx, cy, canvas, image, dirty: true, lastUsed: 0, far: false };
     this.paintView(v);
     return v;
+  }
+
+  /**
+   * 把 chunk 标记为「视口外的背景层」。
+   *
+   * 为什么要分层：横版游戏的世界本质是一张剖面图，没有 3D 纵深。但相机的世界矩形
+   * 通常比世界左右边界宽，两侧会拍到"世界之外"—— 如果不补背景，就是突兀的断口。
+   * 旧做法是把相邻 chunk 也画出来补上断口，可那些 chunk 是从**侧面**（垂直于剖面）
+   * 看过去的岩壁，跟脚下的剖面岩层长得一样，叠在同一屏里就成了
+   * 「怎么有一层半透明的石头压在墙上」。远处那块必须是"看穿了"的岩层背景，
+   * 不是另一堵墙。这里通过降透明度 + 禁混合模式来区分，让它明显退到后面。
+   */
+  private styleFar(v: ChunkView, far: boolean) {
+    if (v.far === far) return;
+    v.far = far;
+    v.image.setAlpha(far ? 0.38 : 1);
+    v.image.setBlendMode(far ? Phaser.BlendModes.MULTIPLY : Phaser.BlendModes.NORMAL);
   }
 
   private paintView(v: ChunkView) {

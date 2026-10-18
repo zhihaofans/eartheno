@@ -12,6 +12,7 @@ import {
   chunkKey,
   parseChunkKey,
   newMeta,
+  migrateSkyRows,
   CHUNK,
   type MetaState,
 } from '../../src/core/save';
@@ -302,5 +303,46 @@ describe('新世界初始状态', () => {
     expect(m.player.playSec).toBe(0);
     expect(m.inv).toEqual(emptyInventory());
     expect(m.deepest).toBe(70);
+  });
+});
+
+describe('老存档的天空迁移（世界顶部上移两行）', () => {
+  const gen = (seed: number) => (cx: number, cy: number) => {
+    const out = new Uint8Array(CHUNK_AREA);
+    // 假的"生成器"：天空行给空气，其余给岩层 —— 只为验证逐字节比对与替换
+    if (cy >= 0) out.fill(3);
+    void seed;
+    return out;
+  };
+
+  it('只改天空两行，玩家的地面改动原样保留', () => {
+    const chunks = new Map<string, Uint8Array>();
+    const sky = new Uint8Array(CHUNK_AREA);
+    sky[100] = 7; // 旧版可能在天空里塞了块木头
+    chunks.set(chunkKey(0, -1), sky);
+    const ground = new Uint8Array(CHUNK_AREA);
+    ground.fill(3);
+    ground[0] = 0; // 玩家挖掉的一格
+    chunks.set(chunkKey(0, 0), ground);
+
+    const touched = migrateSkyRows(chunks, gen(1));
+    expect(touched).toBe(true);
+    // 天空行的异常方块被清掉
+    expect(chunks.get(chunkKey(0, -1))![100]).toBe(0);
+    // 第 0 行不该被动
+    expect(chunks.get(chunkKey(0, 0))![0]).toBe(0);
+    expect(chunks.get(chunkKey(0, 0))![1]).toBe(3);
+  });
+
+  it('没有天空 chunk 时什么都不做（新存档走这条路）', () => {
+    const chunks = new Map<string, Uint8Array>();
+    expect(migrateSkyRows(chunks, gen(1))).toBe(false);
+    expect(chunks.size).toBe(0);
+  });
+
+  it('生成器返回 null（越界）时不崩', () => {
+    const chunks = new Map<string, Uint8Array>();
+    chunks.set(chunkKey(0, -1), new Uint8Array(CHUNK_AREA));
+    expect(migrateSkyRows(chunks, () => null)).toBe(false);
   });
 });
