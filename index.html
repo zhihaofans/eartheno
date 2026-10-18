@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1b1614" />
+    <meta name="description" content="地髓 Eartheno：手机横屏玩的 2D 像素沙盒建造游戏，单机、可离线、存档在本地。" />
+    <!-- 不加 Cache-Control: no-cache 等 meta：缓存决策交给 Service Worker（经验文档 §7.5） -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="地髓" />
+    <!-- 用 %BASE% 占位，由 tools/postbuild.mjs 按实际 base 替换成 "./" 或 "/<仓库名>/"。
+         为什么不留裸相对路径：深层 URL（/repo/a/）会把 "icons/x.png" 解析到错误层级；
+         而写死 "/" 又会让子目录部署全部 404。交给构建时决定才两边都对。 -->
+    <link rel="manifest" href="%BASE%manifest.webmanifest" />
+    <link rel="icon" href="%BASE%icons/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="%BASE%icons/apple-180.png" />
+    <title>地髓 Eartheno</title>
+  </head>
+  <body>
+    <div id="game" aria-label="游戏画面"></div>
+
+    <!-- 竖屏闸门 -->
+    <div id="orient-gate" class="gate" hidden>
+      <svg viewBox="0 0 64 64" class="gate__icon" aria-hidden="true">
+        <rect x="22" y="8" width="20" height="34" rx="4" fill="none" stroke="currentColor" stroke-width="3" />
+        <circle cx="32" cy="36" r="2" fill="currentColor" />
+        <path d="M18 54c8-6 20-6 28 0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+      </svg>
+      <div class="gate__title">请把手机横过来</div>
+      <div class="gate__sub">地髓是横版世界，横屏才能看见脚下的矿脉。</div>
+    </div>
+
+    <!-- 启动 / 读档中的遮罩 -->
+    <div id="boot" class="gate">
+      <div class="boot__logo" aria-hidden="true"></div>
+      <div class="gate__title">地髓</div>
+      <div class="gate__sub" id="boot-text">正在开凿地脉…</div>
+    </div>
+
+    <div id="ui" hidden></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="banner" class="banner" hidden></div>
+    <div id="sheet" class="sheet" hidden></div>
+    <div id="fps" class="fps" hidden>—</div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

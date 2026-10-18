@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="512" height="512" role="img" aria-label="地髓">
+  <defs>
+    <radialGradient id="g" cx="50%" cy="42%" r="70%">
+      <stop offset="0%" stop-color="#1c222e"/>
+      <stop offset="100%" stop-color="#10131a"/>
+    </radialGradient>
+  </defs>
+  <rect width="16" height="16" rx="3.4" fill="url(#g)"/>
+  <rect x="2.2" y="5.6" width="8.8" height="3.2" fill="#60a858"/>
+  <rect x="2.2" y="8.8" width="8.8" height="0.9" fill="#3e7a3c"/>
+  <rect x="2.2" y="9.7" width="8.8" height="4.1" fill="#5c402a"/>
+  <rect x="3.3" y="10.9" width="1.6" height="1" fill="#402b1c"/>
+  <rect x="6.3" y="12" width="1.9" height="1" fill="#402b1c"/>
+  <rect x="11.8" y="5.6" width="2" height="3.2" fill="#3e7a3c"/>
+  <rect x="11.8" y="8.8" width="2" height="5" fill="#7a7e8a"/>
+  <path d="M8.4 6.2 L7.6 9.4 L8.6 10.2 L7.9 13.4" stroke="#3ea89e" stroke-width="0.7" fill="none" stroke-linecap="round"/>
+  <circle cx="8.9" cy="11.6" r="0.75" fill="#7ee6d6"/>
+  <rect x="4" y="7" width="0.9" height="0.9" fill="#e88a52"/>
+</svg>

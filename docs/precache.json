@@ -1,0 +1,17 @@
+{
+  "build": "20261018-1752-cazc",
+  "files": [
+    "./assets/index-CjizlZQO.js",
+    "./assets/phaser-0YPJO2g1.js",
+    "./assets/style-BgU-1fxP.css",
+    "./icons/apple-180.png",
+    "./icons/favicon-32.png",
+    "./icons/icon-192.png",
+    "./icons/icon-512-maskable.png",
+    "./icons/icon-512.png",
+    "./icons/icon.svg",
+    "./icons/shot-landscape.png",
+    "./index.html",
+    "./manifest.webmanifest"
+  ]
+}
